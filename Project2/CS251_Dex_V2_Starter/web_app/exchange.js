@@ -311,7 +311,7 @@ const token_abi = [
     inputs: [
       {
         internalType: 'address',
-        name: 'recipient',
+        name: 'to',
         type: 'address',
       },
       {
@@ -335,12 +335,12 @@ const token_abi = [
     inputs: [
       {
         internalType: 'address',
-        name: 'sender',
+        name: 'from',
         type: 'address',
       },
       {
         internalType: 'address',
-        name: 'recipient',
+        name: 'to',
         type: 'address',
       },
       {
@@ -401,6 +401,32 @@ const exchange_abi = [
       },
     ],
     name: 'OwnershipTransferred',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: 'uint256',
+        name: 'amountToken',
+        type: 'uint256',
+      },
+    ],
+    name: 'SwapETHForToken',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      {
+        indexed: false,
+        internalType: 'uint256',
+        name: 'amountETH',
+        type: 'uint256',
+      },
+    ],
+    name: 'SwapTokenForETH',
     type: 'event',
   },
   {
@@ -624,40 +650,57 @@ async function init() {
   if (poolState['token_liquidity'] === 0 && poolState['eth_liquidity'] === 0) {
     // Call mint twice to make sure mint can be called mutliple times prior to disable_mint
     const total_supply = 100000;
-    await token_contract.connect(provider.getSigner(defaultAccount)).mint(total_supply / 2);
-    await token_contract.connect(provider.getSigner(defaultAccount)).mint(total_supply / 2);
+    const half_total_supply = parseTokenAmountMul(total_supply / 2);
+    await token_contract.connect(provider.getSigner(defaultAccount)).mint(half_total_supply);
+    await token_contract.connect(provider.getSigner(defaultAccount)).mint(half_total_supply);
     await token_contract.connect(provider.getSigner(defaultAccount)).disable_mint();
-    await token_contract.connect(provider.getSigner(defaultAccount)).approve(exchange_address, total_supply);
-    // initialize pool with equal amounts of ETH and tokens, so exchange rate begins as 1:1
+    await token_contract
+      .connect(provider.getSigner(defaultAccount))
+      .approve(exchange_address, parseTokenAmountMul(total_supply));
+    // // initialize pool with equal amounts of ETH and tokens, so exchange rate begins as 1:1
 
     await exchange_contract
       .connect(provider.getSigner(defaultAccount))
-      .createPool(5000, { value: ethers.utils.parseUnits('5000', 'wei') });
+      .createPool(parseTokenAmountMul(5000), { value: ethers.utils.parseUnits('5000', 'ether') });
     console.log('init finished');
 
     // All accounts start with 0 of your tokens. Thus, be sure to swap before adding liquidity.
   }
 
   const valueTest = await exchange_contract.connect(provider.getSigner(defaultAccount)).getValueTest();
-  console.log(valueTest);
-  console.log(valueTest[4].toNumber());
-  console.log(valueTest[5].toNumber());
-  const tokenAmount = ethers.utils.parseUnits('5000', 18).toString();
-  const ethAmount = ethers.utils.parseUnits('5000', 'ether').toString();
-  console.log({ tokenAmount, ethAmount });
+  console.log({ lp_provider: valueTest[0] });
+  // console.log('total: ', valueTest[1].toString());
+  // console.log('K: ', valueTest[2].toString());
+  console.log({ lpValue: valueTest[3] });
+  // console.log('Token pool: ', valueTest[4].toString());
+  // console.log('ETH pool: ', valueTest[5].toString());
 }
 
 // Lấy trạng trái của 1 bể thanh khoản (số lượng vs tỉ giá)
 async function getPoolState() {
   // read pool balance for each type of liquidity:
-  let liquidity_tokens = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(exchange_address); // Lấy số dư của custom token trong pool
-  let liquidity_eth = await provider.getBalance(exchange_address); //Lấy số dư của native token
+  let liquidity_tokens = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(exchange_address);
+  liquidity_tokens = parseTokenAmountDiv(liquidity_tokens);
+  let liquidity_eth = await provider.getBalance(exchange_address);
+  liquidity_eth = parseTokenAmountDiv(liquidity_eth);
   return {
-    token_liquidity: Number(liquidity_tokens),
-    eth_liquidity: Number(liquidity_eth),
-    token_eth_rate: Number(liquidity_tokens) / Number(liquidity_eth),
-    eth_token_rate: Number(liquidity_eth) / Number(liquidity_tokens),
+    token_liquidity: liquidity_tokens,
+    eth_liquidity: liquidity_eth,
+    token_eth_rate: liquidity_tokens / liquidity_eth,
+    eth_token_rate: liquidity_eth / liquidity_tokens,
   };
+}
+
+function parseTokenAmountDiv(amountTokens) {
+  const numberString = amountTokens.toString();
+  const convertDHN = Number(`${numberString.slice(0, -18)}.${numberString.slice(-18)}`);
+  return convertDHN;
+}
+
+function parseTokenAmountMul(amountTokens) {
+  const decimals = ethers.BigNumber.from(18);
+  const unit = ethers.BigNumber.from(10).pow(decimals);
+  return ethers.BigNumber.from(amountTokens).mul(unit).toString();
 }
 
 // ============================================================
@@ -670,55 +713,71 @@ async function getPoolState() {
 /*** ADD LIQUIDITY ***/
 async function addLiquidity(amountEth, maxSlippagePct) {
   try {
-    const tx = await exchange_contract
-      .connect(provider.getSigner(defaultAccount))
-      .addLiquidity({ value: ethers.utils.parseUnits(amountEth, 'wei') });
+    const balance = await token_contract.balanceOf(defaultAccount);
+    const contractDHNSigner = await token_contract.connect(provider.getSigner(defaultAccount));
+    const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
+    await contractDHNSigner.approve(exchange_address, balance);
+    const tx = await contractExchangeSigner.addLiquidity({ value: ethers.utils.parseUnits(amountEth, 'ether') });
+    await tx.wait();
+
     console.log({
-      success: true,
       message: 'Add Liquidity successfull!',
       tx,
     });
   } catch (error) {
-    console.log(error);
+    const errorMessage = error.error.message;
+    alert(errorMessage);
   }
 }
 
 /*** REMOVE LIQUIDITY ***/
 async function removeLiquidity(amountEth, maxSlippagePct) {
   try {
-    const tx = await exchange_contract.connect(provider.getSigner(defaultAccount)).removeLiquidity(amountEth);
+    const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
+    const tx = await contractExchangeSigner.removeLiquidity(parseTokenAmountMul(amountEth));
+    await tx.wait();
+
     console.log({
-      success: true,
       message: 'Remove Liquidity successfull!',
       tx,
     });
   } catch (error) {
-    console.log(error);
+    const errorMessage = error.error.message;
+    alert(errorMessage);
   }
 }
 
 async function removeAllLiquidity(maxSlippagePct) {
   try {
     const tx = await exchange_contract.connect(provider.getSigner(defaultAccount)).removeAllLiquidity();
+    await tx.wait();
+
     console.log({
-      success: true,
       message: 'Remove All Liquidity successfull!',
       tx,
     });
   } catch (error) {
-    console.log(error);
+    const errorMessage = error.error.message;
+    alert(errorMessage);
   }
 }
 
 /*** SWAP ***/
 async function swapTokensForETH(amountToken, maxSlippagePct) {
   try {
-    await exchange_contract.connect(provider.getSigner(defaultAccount)).swapTokensForETH(amountToken);
-    const poolState = await getPoolState();
+    const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
+    const contractDHNSigner = await token_contract.connect(provider.getSigner(defaultAccount));
+    await contractDHNSigner.approve(exchange_address, parseTokenAmountMul(amountToken));
+    const tx = await contractExchangeSigner.swapTokensForETH(parseTokenAmountMul(amountToken));
+    await tx.wait();
+
     console.log({
-      success: true,
-      message: 'Swap successfull!',
-      poolState,
+      message: 'Swap Token to ETh successfull!',
+      tx,
+    });
+
+    contractExchangeSigner.on('SwapTokenForETH', (amountETH) => {
+      alert(`Address: ${defaultAccount}\nSwap: ${amountToken} (DHN)\nReceive: ${parseTokenAmountDiv(amountETH)} (ETH)`);
     });
   } catch (error) {
     console.log(error);
@@ -727,16 +786,18 @@ async function swapTokensForETH(amountToken, maxSlippagePct) {
 
 async function swapETHForTokens(amountEth, maxSlippagePct) {
   try {
-    await exchange_contract
-      .connect(provider.getSigner(defaultAccount))
-      .swapETHForTokens({ value: ethers.utils.parseUnits(amountEth, 'wei') });
-    const poolState = await getPoolState();
+    const contractSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
+    const tx = await contractSigner.swapETHForTokens({ value: ethers.utils.parseUnits(amountEth, 'ether') });
+    await tx.wait();
+
     console.log({
-      success: true,
-      message: 'Swap successfull!',
-      poolState,
+      message: 'Swap ETH to Token successfull!',
+      tx,
     });
-    alert({ message: 'Swap successfull!', poolState });
+
+    contractSigner.on('SwapETHForToken', (amountToken) => {
+      alert(`Address: ${defaultAccount}\nSwap: ${amountEth} (ETH)\nReceive: ${parseTokenAmountDiv(amountToken)} (DHN)`);
+    });
   } catch (error) {
     console.log(error);
   }
@@ -767,14 +828,14 @@ provider.listAccounts().then((response) => {
 // Lấy số dư ETH
 async function getETHBalance(walletAddress) {
   const balance = await provider.getBalance(walletAddress);
-  console.log(`ETH balance: ${ethers.utils.formatEther(balance)}`);
+  console.log(`ETH balance address ${walletAddress}: ${ethers.utils.formatEther(balance)}`);
   return balance;
 }
 
 // Lấy số dư token
 async function getTokenBalance(walletAddress) {
   const balance = await token_contract.balanceOf(walletAddress);
-  console.log(`Token balance: ${balance}`);
+  console.log(`Token balance address ${walletAddress}: ${balance}`);
   return balance;
 }
 // --------------------
@@ -784,7 +845,6 @@ provider.listAccounts().then((response) => {
   var opts = response.map(function (a) {
     getETHBalance(a);
     getTokenBalance(a);
-
     return '<option value="' + a.toLowerCase() + '">' + a.toLowerCase() + '</option>';
   });
   $('.account').html(opts);
@@ -794,7 +854,7 @@ provider.listAccounts().then((response) => {
 $('#swap-eth').click(function () {
   defaultAccount = $('#myaccount').val(); //sets the default account
   swapETHForTokens($('#amt-to-swap').val(), $('#max-slippage-swap').val()).then((response) => {
-    // window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
+    window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
   });
 });
 
@@ -802,7 +862,7 @@ $('#swap-eth').click(function () {
 $('#swap-token').click(function () {
   defaultAccount = $('#myaccount').val(); //sets the default account
   swapTokensForETH($('#amt-to-swap').val(), $('#max-slippage-swap').val()).then((response) => {
-    // window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
+    window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
   });
 });
 
@@ -811,7 +871,7 @@ $('#add-liquidity').click(function () {
   console.log('Account: ', $('#myaccount').val());
   defaultAccount = $('#myaccount').val(); //sets the default account
   addLiquidity($('#amt-eth').val(), $('#max-slippage-liquid').val()).then((response) => {
-    // window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
+    window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
   });
 });
 
@@ -819,7 +879,7 @@ $('#add-liquidity').click(function () {
 $('#remove-liquidity').click(function () {
   defaultAccount = $('#myaccount').val(); //sets the default account
   removeLiquidity($('#amt-eth').val(), $('#max-slippage-liquid').val()).then((response) => {
-    // window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
+    window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
   });
 });
 
@@ -827,7 +887,7 @@ $('#remove-liquidity').click(function () {
 $('#remove-all-liquidity').click(function () {
   defaultAccount = $('#myaccount').val(); //sets the default account
   removeAllLiquidity($('#max-slippage-liquid').val()).then((response) => {
-    // window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
+    window.location.reload(true); // refreshes the page after add_IOU returns and the promise is unwrapped
   });
 });
 

@@ -6,8 +6,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 // Your token contract
 contract Token is Ownable, ERC20 {
-    string private constant _symbol = "DHN"; // TODO: Give your token a symbol (all caps!)
-    string private constant _name = "DuhanaToken"; // TODO: Give your token a name
+    string private constant _symbol = "DHN";
+    string private constant _name = "Duhana Token";
     bool private _mintingEnabled = true;
 
     event MintingDisabled();

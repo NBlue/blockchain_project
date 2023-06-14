@@ -26,6 +26,9 @@ contract TokenExchange is Ownable {
     // Constant: x * y = k
     uint private k;
 
+    event SwapETHForToken(uint256 amountToken);
+    event SwapTokenForETH(uint256 amountETH);
+
     constructor() {}
 
     function getValueTest()
@@ -57,7 +60,6 @@ contract TokenExchange is Ownable {
     // amountTokens: só lượng token được chuyển từ nhà cung cấp thanh khoản
     // Chuyển amountTokens đến sc và cập nhật số lượng DHN và ETH trong bể thanh khoản
     function createPool(uint amountTokens) external payable onlyOwner {
-        // Chỉ người sở hữu hợp đồng mới được gọi hàm này
         // This function is already implemented for you; no changes needed.
 
         // require pool does not yet exist: - Đảm bảo chỉ có thể tạo 1 bể thanh khoản mới nếu bể thanh khoản trước đó không tồn tại
@@ -66,7 +68,6 @@ contract TokenExchange is Ownable {
 
         // require nonzero values were sent - Đảm bảo giá trị ETH được gửi vào sc > 0
         require(msg.value > 0, "Need eth to create pool.");
-        // Kiểm tra số lượng token (custom) của người gọi hàm
         uint tokenSupply = token.balanceOf(msg.sender);
         require(
             amountTokens <= tokenSupply,
@@ -74,10 +75,13 @@ contract TokenExchange is Ownable {
         );
         require(amountTokens > 0, "Need tokens to create pool.");
 
-        token.transferFrom(msg.sender, address(this), amountTokens); // Chuyển amountTokens của người gọi hàm vào hợp đồng này
-        token_reserves = token.balanceOf(address(this)); // Cập nhật số lượng token trong bể thanh khoản
-        eth_reserves = msg.value; // Cập nhật số lượng ETH trong bể thanh khoản
+        token.transferFrom(msg.sender, address(this), amountTokens);
+        token_reserves = token.balanceOf(address(this));
+        eth_reserves = msg.value;
         k = token_reserves * eth_reserves;
+
+        lps[msg.sender] = 1000;
+        lp_providers.push(msg.sender);
     }
 
     // Function removeLP: removes a liquidity provider from the list.
@@ -105,68 +109,6 @@ contract TokenExchange is Ownable {
     // ============================================================
 
     /* ========================= Liquidity Provider Functions =========================  */
-    function updateAddStake(address provider, uint256 ethSend) private {
-        bool isLP = false;
-        uint256 oldETHtoken;
-        uint256 LPtokenRatio;
-
-        for (uint i = 0; i < lp_providers.length; i++) {
-            if (lp_providers[i] != provider) {
-                oldETHtoken = (lps[lp_providers[i]] * eth_reserves) / 1000;
-                LPtokenRatio = (1000 * oldETHtoken) / address(this).balance;
-                lps[lp_providers[i]] = LPtokenRatio;
-            } else {
-                isLP = true;
-                oldETHtoken = (lps[provider] * eth_reserves) / 1000;
-                LPtokenRatio =
-                    (1000 * (ethSend + oldETHtoken)) /
-                    address(this).balance;
-                lps[provider] = LPtokenRatio;
-            }
-        }
-
-        if (!isLP) {
-            LPtokenRatio = (1000 * ethSend) / address(this).balance;
-            lp_providers.push(provider);
-            lps[provider] = LPtokenRatio;
-        }
-    }
-
-    function updateRemoveStake(address provider, uint256 ethSend) private {
-        uint256 oldETHtoken;
-        uint256 LPtokenRatio;
-
-        for (uint i = 0; i < lp_providers.length; i++) {
-            if (lp_providers[i] != provider) {
-                oldETHtoken = (lps[lp_providers[i]] * eth_reserves) / 1000;
-                LPtokenRatio = (1000 * oldETHtoken) / address(this).balance;
-                lps[lp_providers[i]] = LPtokenRatio;
-            } else {
-                oldETHtoken = (lps[provider] * eth_reserves) / 1000;
-                LPtokenRatio =
-                    (1000 * (oldETHtoken - ethSend)) /
-                    address(this).balance;
-                lps[provider] = LPtokenRatio;
-            }
-        }
-    }
-
-    function updateRemoveAllStake(address provider) private {
-        uint256 index = 0;
-        while (index < lp_providers.length && lp_providers[index] != provider) {
-            index++;
-        }
-        require(index < lp_providers.length, "LP provider not found");
-        lp_providers[index] = lp_providers[lp_providers.length - 1];
-        lp_providers.pop();
-        delete lps[provider];
-
-        for (uint i = 0; i < lp_providers.length; i++) {
-            uint256 oldETHtoken = (lps[lp_providers[i]] * eth_reserves) / 1000;
-            uint256 LPtokenRatio = (1000 * oldETHtoken) / address(this).balance;
-            lps[lp_providers[i]] = LPtokenRatio;
-        }
-    }
 
     // Function addLiquidity: Adds liquidity given a supply of ETH (sent to the contract as msg.value).
     // You can change the inputs, or the scope of your function, as needed.
@@ -187,9 +129,8 @@ contract TokenExchange is Ownable {
     // Function removeLiquidity: Removes liquidity given the desired amount of ETH to remove.
     // You can change the inputs, or the scope of your function, as needed.
     function removeLiquidity(
-        uint amountETH // uint max_exchange_rate,
-    ) public payable // uint min_exchange_rate
-    {
+        uint amountETH // uint max_exchange_rate, // uint min_exchange_rate
+    ) public payable {
         require(amountETH > 0, "Invalid input");
 
         uint256 senderETH = (lps[msg.sender] * eth_reserves) / 1000;
@@ -198,7 +139,7 @@ contract TokenExchange is Ownable {
             "Can't remove liquidity > your staking"
         );
 
-        uint amountDHN = (token_reserves * amountETH) / eth_reserves;
+        uint256 amountDHN = (token_reserves * amountETH) / eth_reserves;
         require(
             amountDHN < token_reserves,
             "Can't remove liquidity because pool will be zero"
@@ -228,7 +169,11 @@ contract TokenExchange is Ownable {
         uint256 senderDHN = (lps[msg.sender] * token_reserves) / 1000;
 
         require(
-            lps[msg.sender] < 1000,
+            senderDHN < token_reserves,
+            "Can't remove liquidity because pool will be zero"
+        );
+        require(
+            senderETH < eth_reserves,
             "Can't remove liquidity because pool will be zero"
         );
 
@@ -243,7 +188,64 @@ contract TokenExchange is Ownable {
     }
 
     /***  Define additional functions for liquidity fees here as needed ***/
-    // Thêm 1 số hàm khác bổ sung nếu cần
+    function updateAddStake(address provider, uint256 ethSend) private {
+        bool isLP = false;
+        uint256 oldETHtoken;
+
+        for (uint i = 0; i < lp_providers.length; i++) {
+            if (lp_providers[i] != provider) {
+                oldETHtoken = (lps[lp_providers[i]] * eth_reserves) / 1000;
+                lps[lp_providers[i]] =
+                    (1000 * oldETHtoken) /
+                    address(this).balance;
+            } else {
+                isLP = true;
+                oldETHtoken = (lps[provider] * eth_reserves) / 1000;
+                lps[provider] =
+                    (1000 * (ethSend + oldETHtoken)) /
+                    address(this).balance;
+            }
+        }
+
+        if (!isLP) {
+            lps[provider] = (1000 * ethSend) / address(this).balance;
+            lp_providers.push(provider);
+        }
+    }
+
+    function updateRemoveStake(address provider, uint256 senderETH) private {
+        uint256 oldETH;
+
+        for (uint i = 0; i < lp_providers.length; i++) {
+            if (lp_providers[i] != provider) {
+                oldETH = (lps[lp_providers[i]] * eth_reserves) / 1000;
+                lps[lp_providers[i]] = (1000 * oldETH) / address(this).balance;
+            } else {
+                oldETH = (lps[provider] * eth_reserves) / 1000;
+                uint256 curETH = oldETH - senderETH;
+                if (curETH != 0) {
+                    lps[provider] = (1000 * curETH) / address(this).balance;
+                } else {
+                    removeLP(i);
+                    delete lps[provider];
+                }
+            }
+        }
+    }
+
+    function updateRemoveAllStake(address provider) private {
+        uint256 index = 0;
+        while (index < lp_providers.length && lp_providers[index] != provider) {
+            index++;
+        }
+        removeLP(index);
+        delete lps[provider];
+
+        for (uint i = 0; i < lp_providers.length; i++) {
+            uint256 oldETH = (lps[lp_providers[i]] * eth_reserves) / 1000;
+            lps[lp_providers[i]] = (1000 * oldETH) / address(this).balance;
+        }
+    }
 
     /* ========================= Swap Functions =========================  */
 
@@ -252,7 +254,7 @@ contract TokenExchange is Ownable {
     function swapTokensForETH(
         uint amountTokens // ,uint max_exchange_rate
     ) external payable {
-        require(amountTokens > 0, "NOt enough ETH sent");
+        require(amountTokens > 0, "Not enough ETH sent");
         uint256 amountETH = getAmount(
             amountTokens,
             token_reserves,
@@ -261,21 +263,21 @@ contract TokenExchange is Ownable {
         token.transferFrom(msg.sender, address(this), amountTokens);
         (bool success, ) = payable(msg.sender).call{value: amountETH}("");
         require(success);
-        token_reserves = token.balanceOf(address(this)); // Cập nhật lại ETH và DHN sau khi swap vào biến tạm thời
+        token_reserves = token.balanceOf(address(this));
         eth_reserves = address(this).balance;
+        emit SwapTokenForETH(amountETH);
     }
 
     // Function swapETHForTokens: Swaps ETH for your tokens
     // ETH is sent to contract as msg.value
     // You can change the inputs, or the scope of your function, as needed.
-    // HOán đổi ETH lấy custom token
-    function swapETHForTokens() external payable // uint max_exchange_rate
-    {
-        require(msg.value > 0, "not enough ETH to swap");
+    function swapETHForTokens() external payable {
+        require(msg.value > 0, "Not enough ETH to swap");
         uint256 amountDHN = getAmount(msg.value, eth_reserves, token_reserves);
         token.transfer(msg.sender, amountDHN);
-        token_reserves = token.balanceOf(address(this)); // Cập nhật lại ETH và DHN sau khi swap vào biến tạm thời
+        token_reserves = token.balanceOf(address(this));
         eth_reserves = address(this).balance;
+        emit SwapETHForToken(amountDHN);
     }
 
     // Caculate token when it swapped
