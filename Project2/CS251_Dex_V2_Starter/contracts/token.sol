@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+
 // Your token contract
 contract Token is Ownable, ERC20 {
     string private constant _symbol = "DHN";
@@ -11,6 +12,8 @@ contract Token is Ownable, ERC20 {
     bool private _mintingEnabled = true;
 
     event MintingDisabled();
+
+    bool private can_mint = true;
 
     constructor() ERC20(_name, _symbol) {}
 

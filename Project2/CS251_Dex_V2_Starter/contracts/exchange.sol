@@ -295,4 +295,5 @@ contract TokenExchange is Ownable {
         uint256 outputAmount = numerator / denominator;
         return outputAmount;
     }
+
 }
