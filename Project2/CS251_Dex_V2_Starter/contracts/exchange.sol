@@ -112,9 +112,8 @@ contract TokenExchange is Ownable {
 
     // Function addLiquidity: Adds liquidity given a supply of ETH (sent to the contract as msg.value).
     // You can change the inputs, or the scope of your function, as needed.
-    function addLiquidity() external payable // uint max_exchange_rate,
-    // uint min_exchange_rate
-    {
+    // (uint max_exchange_rate,uint min_exchange_rate)
+    function addLiquidity() external payable {
         uint256 amountDHN = (msg.value * token_reserves) / eth_reserves;
         uint256 userDHNBalance = token.balanceOf(msg.sender);
         require(userDHNBalance >= amountDHN, "Not enough DHN");
@@ -124,13 +123,13 @@ contract TokenExchange is Ownable {
 
         token_reserves = token.balanceOf(address(this));
         eth_reserves = address(this).balance;
+        k = token_reserves * eth_reserves;
     }
 
     // Function removeLiquidity: Removes liquidity given the desired amount of ETH to remove.
     // You can change the inputs, or the scope of your function, as needed.
-    function removeLiquidity(
-        uint amountETH // uint max_exchange_rate, // uint min_exchange_rate
-    ) public payable {
+    // uint max_exchange_rate, uint min_exchange_rate
+    function removeLiquidity(uint amountETH) public payable {
         require(amountETH > 0, "Invalid input");
 
         uint256 senderETH = (lps[msg.sender] * eth_reserves) / 1000;
@@ -157,14 +156,14 @@ contract TokenExchange is Ownable {
 
         token_reserves = token.balanceOf(address(this));
         eth_reserves = address(this).balance;
+        k = token_reserves * eth_reserves;
     }
 
     // Function removeAllLiquidity: Removes all liquidity that msg.sender is entitled to withdraw
     // You can change the inputs, or the scope of your function, as needed.
     // Xóa tất cả thanh khoản mà msg.sender được quyền rút
-    function removeAllLiquidity() external payable // uint max_exchange_rate,
-    // uint min_exchange_rate
-    {
+    // uint max_exchange_rate, uint min_exchange_rate
+    function removeAllLiquidity() external payable {
         uint256 senderETH = (lps[msg.sender] * eth_reserves) / 1000;
         uint256 senderDHN = (lps[msg.sender] * token_reserves) / 1000;
 
@@ -185,6 +184,7 @@ contract TokenExchange is Ownable {
 
         token_reserves = token.balanceOf(address(this));
         eth_reserves = address(this).balance;
+        k = token_reserves * eth_reserves;
     }
 
     /***  Define additional functions for liquidity fees here as needed ***/
@@ -251,15 +251,35 @@ contract TokenExchange is Ownable {
 
     // Function swapTokensForETH: Swaps your token with ETH
     // You can change the inputs, or the scope of your function, as needed.
+    // uint max_exchange_rate
     function swapTokensForETH(
-        uint amountTokens // ,uint max_exchange_rate
+        uint amountTokens,
+        uint max_exchange_rate
     ) external payable {
         require(amountTokens > 0, "Not enough ETH sent");
+        uint256 inputEthWithFee = amountTokens *
+            (swap_fee_denominator - swap_fee_numerator); // 97%
         uint256 amountETH = getAmount(
-            amountTokens,
+            inputEthWithFee,
             token_reserves,
             eth_reserves
         );
+        require(
+            eth_reserves - amountETH >= 10 ** 18,
+            "Can't swap because pool ETH will be zero"
+        );
+
+        // Check độ trượt giá
+        uint256 eth_perfect = (inputEthWithFee * eth_reserves) /
+            (swap_fee_denominator * token_reserves);
+        uint256 slippage = ((eth_perfect - amountETH) * 1000) / eth_perfect;
+        console.log("Slippage: ", slippage);
+        require(
+            slippage <= max_exchange_rate * 10,
+            "Unable to trade because of excessive slippage"
+        );
+
+        // Ngưỡng đặt cho phép thực hiện swap
         token.transferFrom(msg.sender, address(this), amountTokens);
         (bool success, ) = payable(msg.sender).call{value: amountETH}("");
         require(success);
@@ -271,13 +291,38 @@ contract TokenExchange is Ownable {
     // Function swapETHForTokens: Swaps ETH for your tokens
     // ETH is sent to contract as msg.value
     // You can change the inputs, or the scope of your function, as needed.
-    function swapETHForTokens() external payable {
+    function swapETHForTokens(uint max_exchange_rate) external payable {
         require(msg.value > 0, "Not enough ETH to swap");
-        uint256 amountDHN = getAmount(msg.value, eth_reserves, token_reserves);
-        token.transfer(msg.sender, amountDHN);
-        token_reserves = token.balanceOf(address(this));
-        eth_reserves = address(this).balance;
-        emit SwapETHForToken(amountDHN);
+        uint256 inputEthWithFee = msg.value *
+            (swap_fee_denominator - swap_fee_numerator); // 97%
+        uint256 amountDHN = getAmount(
+            inputEthWithFee,
+            eth_reserves,
+            token_reserves
+        );
+        require(
+            token_reserves - amountDHN >= 10 ** 18,
+            "Can't swap because pool DHN will be zero"
+        );
+
+        // Check độ trượt giá
+        uint256 token_perfect = (inputEthWithFee * token_reserves) /
+            (swap_fee_denominator * eth_reserves);
+        uint256 slippage = ((token_perfect - amountDHN) * 1000) / token_perfect;
+        console.log("Slippage: ", slippage);
+        if (slippage <= max_exchange_rate * 10) {
+            token.transfer(msg.sender, amountDHN);
+            token_reserves = token.balanceOf(address(this));
+            eth_reserves = address(this).balance;
+            emit SwapETHForToken(amountDHN);
+        } else {
+            (bool success, ) = payable(msg.sender).call{value: msg.value}(""); //Hoàn lại lượng eth đã gửi Vì không thể hoán đổi
+            require(success);
+            require(
+                slippage <= max_exchange_rate * 10,
+                "Unable to trade because of excessive slippage"
+            );
+        }
     }
 
     // Caculate token when it swapped
@@ -286,14 +331,9 @@ contract TokenExchange is Ownable {
         uint256 reserveX,
         uint256 reserveY
     ) public view returns (uint256) {
-        uint256 inputAmountwitFee = inputAmount *
-            (swap_fee_denominator - swap_fee_numerator);
-        uint256 numerator = reserveY * inputAmountwitFee;
-        uint256 denominator = (reserveX *
-            swap_fee_denominator +
-            inputAmountwitFee);
+        uint256 numerator = reserveY * inputAmount;
+        uint256 denominator = (reserveX * swap_fee_denominator + inputAmount);
         uint256 outputAmount = numerator / denominator;
         return outputAmount;
     }
-
 }
