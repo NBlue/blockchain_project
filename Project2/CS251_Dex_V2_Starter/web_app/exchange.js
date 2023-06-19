@@ -588,7 +588,13 @@ const exchange_abi = [
     type: 'function',
   },
   {
-    inputs: [],
+    inputs: [
+      {
+        internalType: 'uint256',
+        name: 'max_exchange_rate',
+        type: 'uint256',
+      },
+    ],
     name: 'swapETHForTokens',
     outputs: [],
     stateMutability: 'payable',
@@ -599,6 +605,11 @@ const exchange_abi = [
       {
         internalType: 'uint256',
         name: 'amountTokens',
+        type: 'uint256',
+      },
+      {
+        internalType: 'uint256',
+        name: 'max_exchange_rate',
         type: 'uint256',
       },
     ],
@@ -646,7 +657,7 @@ const exchange_contract = new ethers.Contract(exchange_address, exchange_abi, pr
 async function init() {
   var poolState = await getPoolState();
   console.log('starting init');
-  console.log({ poolState });
+  // console.log({ poolState });
   if (poolState['token_liquidity'] === 0 && poolState['eth_liquidity'] === 0) {
     // Call mint twice to make sure mint can be called mutliple times prior to disable_mint
     const total_supply = 100000;
@@ -667,11 +678,11 @@ async function init() {
     // All accounts start with 0 of your tokens. Thus, be sure to swap before adding liquidity.
   }
 
-  const valueTest = await exchange_contract.connect(provider.getSigner(defaultAccount)).getValueTest();
-  console.log({ lp_provider: valueTest[0] });
-  // console.log('total: ', valueTest[1].toString());
-  // console.log('K: ', valueTest[2].toString());
-  console.log({ lpValue: valueTest[3] });
+  // const valueTest = await exchange_contract.connect(provider.getSigner(defaultAccount)).getValueTest();
+  // console.log({ lp_provider: valueTest[0] });
+  // // console.log('total: ', valueTest[1].toString());
+  // // console.log('K: ', valueTest[2].toString());
+  // console.log({ lpValue: valueTest[3] });
   // console.log('Token pool: ', valueTest[4].toString());
   // console.log('ETH pool: ', valueTest[5].toString());
 }
@@ -713,11 +724,12 @@ function parseTokenAmountMul(amountTokens) {
 /*** ADD LIQUIDITY ***/
 async function addLiquidity(amountEth, maxSlippagePct) {
   try {
+    const eth = amountEth.toString();
     const balance = await token_contract.balanceOf(defaultAccount);
     const contractDHNSigner = await token_contract.connect(provider.getSigner(defaultAccount));
     const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
     await contractDHNSigner.approve(exchange_address, balance);
-    const tx = await contractExchangeSigner.addLiquidity({ value: ethers.utils.parseUnits(amountEth, 'ether') });
+    const tx = await contractExchangeSigner.addLiquidity({ value: ethers.utils.parseUnits(eth, 'ether') });
     await tx.wait();
 
     console.log({
@@ -725,6 +737,7 @@ async function addLiquidity(amountEth, maxSlippagePct) {
       tx,
     });
   } catch (error) {
+    console.log(error);
     const errorMessage = error.error.message;
     alert(errorMessage);
   }
@@ -733,8 +746,9 @@ async function addLiquidity(amountEth, maxSlippagePct) {
 /*** REMOVE LIQUIDITY ***/
 async function removeLiquidity(amountEth, maxSlippagePct) {
   try {
+    const eth = amountEth.toString();
     const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
-    const tx = await contractExchangeSigner.removeLiquidity(parseTokenAmountMul(amountEth));
+    const tx = await contractExchangeSigner.removeLiquidity(parseTokenAmountMul(eth));
     await tx.wait();
 
     console.log({
@@ -742,6 +756,7 @@ async function removeLiquidity(amountEth, maxSlippagePct) {
       tx,
     });
   } catch (error) {
+    console.log(error);
     const errorMessage = error.error.message;
     alert(errorMessage);
   }
@@ -757,6 +772,7 @@ async function removeAllLiquidity(maxSlippagePct) {
       tx,
     });
   } catch (error) {
+    console.log(error);
     const errorMessage = error.error.message;
     alert(errorMessage);
   }
@@ -765,10 +781,12 @@ async function removeAllLiquidity(maxSlippagePct) {
 /*** SWAP ***/
 async function swapTokensForETH(amountToken, maxSlippagePct) {
   try {
+    const token = amountToken.toString();
+    const slippage = maxSlippagePct.toString();
     const contractExchangeSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
     const contractDHNSigner = await token_contract.connect(provider.getSigner(defaultAccount));
-    await contractDHNSigner.approve(exchange_address, parseTokenAmountMul(amountToken));
-    const tx = await contractExchangeSigner.swapTokensForETH(parseTokenAmountMul(amountToken));
+    await contractDHNSigner.approve(exchange_address, parseTokenAmountMul(token));
+    const tx = await contractExchangeSigner.swapTokensForETH(parseTokenAmountMul(token), slippage);
     await tx.wait();
 
     console.log({
@@ -781,13 +799,18 @@ async function swapTokensForETH(amountToken, maxSlippagePct) {
     });
   } catch (error) {
     console.log(error);
+    alert(error.error.message);
   }
 }
 
 async function swapETHForTokens(amountEth, maxSlippagePct) {
   try {
+    const eth = amountEth.toString();
+    const splippage = maxSlippagePct.toString();
     const contractSigner = await exchange_contract.connect(provider.getSigner(defaultAccount));
-    const tx = await contractSigner.swapETHForTokens({ value: ethers.utils.parseUnits(amountEth, 'ether') });
+    const tx = await contractSigner.swapETHForTokens(splippage, {
+      value: ethers.utils.parseUnits(eth, 'ether'),
+    });
     await tx.wait();
 
     console.log({
@@ -800,6 +823,7 @@ async function swapETHForTokens(amountEth, maxSlippagePct) {
     });
   } catch (error) {
     console.log(error);
+    alert(error.error.message);
   }
 }
 
@@ -843,8 +867,8 @@ async function getTokenBalance(walletAddress) {
 // Allows switching between accounts in 'My Account'
 provider.listAccounts().then((response) => {
   var opts = response.map(function (a) {
-    getETHBalance(a);
-    getTokenBalance(a);
+    // getETHBalance(a);
+    // getTokenBalance(a);
     return '<option value="' + a.toLowerCase() + '">' + a.toLowerCase() + '</option>';
   });
   $('.account').html(opts);
@@ -924,11 +948,12 @@ const sanityCheck = async function () {
   defaultAccount = accounts[0];
   var score = 0;
   var start_state = await getPoolState();
+  //
   var start_tokens = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
 
   // No liquidity provider rewards implemented yet
   if (Number(swap_fee[0]) == 0) {
-    await swapETHForTokens(100, 1);
+    await swapETHForTokens(100, 2);
     var state1 = await getPoolState();
     var expected_tokens_received = 100 * start_state.token_eth_rate;
     var user_tokens1 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
@@ -940,7 +965,7 @@ const sanityCheck = async function () {
         Math.abs(Number(start_tokens) + expected_tokens_received - Number(user_tokens1)) < 5
     );
 
-    await swapTokensForETH(100, 1);
+    await swapTokensForETH(100, 2);
     var state2 = await getPoolState();
     var expected_eth_received = 100 * state1.eth_token_rate;
     var user_tokens2 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
@@ -952,7 +977,7 @@ const sanityCheck = async function () {
         Number(user_tokens2) === Number(user_tokens1) - 100
     );
 
-    await addLiquidity(100, 1);
+    await addLiquidity(100, 2);
     var expected_tokens_added = 100 * state2.token_eth_rate;
     var state3 = await getPoolState();
     var user_tokens3 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
@@ -994,19 +1019,19 @@ const sanityCheck = async function () {
     var swap_fee = swap_fee[0] / swap_fee[1];
     console.log('swap fee: ', swap_fee);
 
-    await swapETHForTokens(100, 1);
+    await swapETHForTokens(100, 2);
     var state1 = await getPoolState();
     var expected_tokens_received = 100 * (1 - swap_fee) * start_state.token_eth_rate;
     var user_tokens1 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
     score += check(
       'Testing simple exchange of ETH to token',
       swap_fee[0],
-      Math.abs(start_state.token_liquidity - expected_tokens_received - state1.token_liquidity) < 5 &&
-        state1.eth_liquidity - start_state.eth_liquidity === 100 &&
+      Math.abs(start_state.token_liquidity - expected_tokens_received - state1.token_liquidity) < 5 && // ĐK này thấy ...
+        state1.eth_liquidity - start_state.eth_liquidity === 100 && //DK nay dung
         Math.abs(Number(start_tokens) + expected_tokens_received - Number(user_tokens1)) < 5
     );
 
-    await swapTokensForETH(100, 1);
+    await swapTokensForETH(100, 2);
     var state2 = await getPoolState();
     var expected_eth_received = 100 * (1 - swap_fee) * state1.eth_token_rate;
     var user_tokens2 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
@@ -1018,7 +1043,7 @@ const sanityCheck = async function () {
         Number(user_tokens2) === Number(user_tokens1) - 100
     );
 
-    await addLiquidity(100, 1);
+    await addLiquidity(100, 2);
     var expected_tokens_added = 100 * state2.token_eth_rate;
     var state3 = await getPoolState();
     var user_tokens3 = await token_contract.connect(provider.getSigner(defaultAccount)).balanceOf(defaultAccount);
@@ -1032,8 +1057,8 @@ const sanityCheck = async function () {
 
     // accumulate some lp rewards
     for (var i = 0; i < 20; i++) {
-      await swapETHForTokens(100, 1);
-      await swapTokensForETH(100, 1);
+      await swapETHForTokens(100, 2);
+      await swapTokensForETH(100, 2);
     }
 
     var state4 = await getPoolState();
