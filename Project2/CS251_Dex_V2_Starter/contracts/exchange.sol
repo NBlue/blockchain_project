@@ -130,6 +130,14 @@ contract TokenExchange is Ownable {
     // You can change the inputs, or the scope of your function, as needed.
     // uint max_exchange_rate, uint min_exchange_rate
     function removeLiquidity(uint amountETH) public payable {
+        bool isLP = false; // Có phải address của Liquidity Provider gọi hàm không?
+        for (uint i = 0; i < lp_providers.length; i++) {
+            if (lp_providers[i] == msg.sender) {
+                isLP = true;
+                break;
+            }
+        }
+        require(isLP, "Address is not a liquidity provider");
         require(amountETH > 0, "Invalid input");
 
         uint256 senderETH = (lps[msg.sender] * eth_reserves) / 1000;
@@ -164,6 +172,15 @@ contract TokenExchange is Ownable {
     // Xóa tất cả thanh khoản mà msg.sender được quyền rút
     // uint max_exchange_rate, uint min_exchange_rate
     function removeAllLiquidity() external payable {
+        bool isLP = false;
+        for (uint i = 0; i < lp_providers.length; i++) {
+            if (lp_providers[i] == msg.sender) {
+                isLP = true;
+                break;
+            }
+        }
+        require(isLP, "Address is not a liquidity provider");
+
         uint256 senderETH = (lps[msg.sender] * eth_reserves) / 1000;
         uint256 senderDHN = (lps[msg.sender] * token_reserves) / 1000;
 
@@ -211,11 +228,11 @@ contract TokenExchange is Ownable {
             lps[provider] = (1000 * ethSend) / address(this).balance;
             lp_providers.push(provider);
         }
+        sumRatioAs1();
     }
 
     function updateRemoveStake(address provider, uint256 senderETH) private {
         uint256 oldETH;
-
         for (uint i = 0; i < lp_providers.length; i++) {
             if (lp_providers[i] != provider) {
                 oldETH = (lps[lp_providers[i]] * eth_reserves) / 1000;
@@ -231,6 +248,7 @@ contract TokenExchange is Ownable {
                 }
             }
         }
+        sumRatioAs1();
     }
 
     function updateRemoveAllStake(address provider) private {
@@ -245,6 +263,16 @@ contract TokenExchange is Ownable {
             uint256 oldETH = (lps[lp_providers[i]] * eth_reserves) / 1000;
             lps[lp_providers[i]] = (1000 * oldETH) / address(this).balance;
         }
+        sumRatioAs1();
+    }
+
+    // Tổng Lps luôn là 1;
+    function sumRatioAs1() private {
+        uint256 sumOtherRatio = 0;
+        for (uint i = 1; i < lp_providers.length; i++) {
+            sumOtherRatio += lps[lp_providers[i]];
+        }
+        lps[lp_providers[0]] = 1000 - sumOtherRatio;
     }
 
     /* ========================= Swap Functions =========================  */
