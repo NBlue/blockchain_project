@@ -5,8 +5,7 @@ const provider = new ethers.providers.JsonRpcProvider('http://localhost:8545');
 var defaultAccount;
 
 // Constant we use later
-var GENESIS =
-  '0x0000000000000000000000000000000000000000000000000000000000000000';
+var GENESIS = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
 // This is the ABI for your contract (get it from Remix, in the 'Compile' tab)
 // ============================================================
@@ -185,11 +184,7 @@ abiDecoder.addABI(abi);
 
 var contractAddress = '0x5FbDB2315678afecb367f032d93F642f64180aa3'; // FIXME: fill this in with your contract's address/hash
 
-var BlockchainSplitwise = new ethers.Contract(
-  contractAddress,
-  abi,
-  provider.getSigner()
-);
+var BlockchainSplitwise = new ethers.Contract(contractAddress, abi, provider.getSigner());
 
 // =============================================================================
 //                            Functions To Implement
@@ -203,14 +198,12 @@ async function getUsers() {
   try {
     const IOUs = await BlockchainSplitwise.getAllDebts();
     return IOUs.map((user) => {
-      const shortDebtor =
-        user.debtor.slice(0, 6) + '...' + user.debtor.slice(-4);
-      const shortCreditor =
-        user.creditor.slice(0, 6) + '...' + user.creditor.slice(-4);
+      const shortDebtor = user.debtor.slice(0, 6) + '...' + user.debtor.slice(-4);
+      const shortCreditor = user.creditor.slice(0, 6) + '...' + user.creditor.slice(-4);
 
-      return `From: ${shortDebtor.toLowerCase()} - To: ${shortCreditor.toLowerCase()} - Own: ${
+      return `Address (${shortDebtor.toLowerCase()}) borrow address (${shortCreditor.toLowerCase()}): ${
         user.amount
-      } - Time: ${timeConverter(user.timestamp)}`;
+      }$ - Time: ${timeConverter(user.timestamp)}`;
     });
   } catch (error) {
     console.log({
@@ -263,6 +256,7 @@ async function add_IOU(creditor, amount) {
     const result = await doBFS(creditor, defaultAccount, getNeighbors); //Tìm đường đi
     if (result) {
       const debReducions = []; // Mảng chứa các index của IOU tìm được bởi doBFS
+      const debReducionsAdr = []; // Mảng chứa các index của IOU tìm được bởi doBFS
       let minAmount = Number.MAX_SAFE_INTEGER; // Số nợ nhỏ nhất trên đường đi BFS
 
       result.push(creditor);
@@ -275,12 +269,20 @@ async function add_IOU(creditor, amount) {
             IOUs[j].creditor.toLowerCase() === result[i + 1].toLowerCase()
           ) {
             debReducions.push(j);
+            debReducionsAdr.push(IOUs[j].debtor);
             if (IOUs[j].amount < minAmount) minAmount = IOUs[j].amount;
           }
         }
       }
       const tx = await BlockchainSplitwise.OwnFor(debReducions, minAmount); // Giải quyết vòng lặp nợ nần
       await tx.wait();
+
+      let alertMessage = 'Phát hiện chu trình:\n';
+      debReducionsAdr.forEach((address) => {
+        alertMessage += `+) Address: ${address}\n`;
+      });
+      alertMessage += `Số nợ có thể xóa trên chu trình: ${minAmount}`;
+      alert(alertMessage);
     }
   } catch (error) {
     console.log({
@@ -352,9 +354,7 @@ async function getAllFunctionCalls(addressOfContract, functionName) {
 
 async function getNeighbors(myAddress) {
   const IOUs = await BlockchainSplitwise.getAllDebts();
-  const neighborsIOUs = IOUs.filter(
-    (IOU) => IOU.debtor.toLowerCase() === myAddress.toLowerCase()
-  );
+  const neighborsIOUs = IOUs.filter((IOU) => IOU.debtor.toLowerCase() === myAddress.toLowerCase());
   const neighborsAddress = neighborsIOUs.map((IOU) => IOU.creditor);
   return neighborsAddress;
 }
@@ -419,9 +419,7 @@ $('#myaccount').change(function () {
 // Cho phép chuyển đổi giữa tài khoản trong "My Account" và "fast-copyt" tỏng "Address of person you owe"
 provider.listAccounts().then((response) => {
   var opts = response.map(function (a) {
-    return (
-      '<option value="' + a.toLowerCase() + '">' + a.toLowerCase() + '</option>'
-    );
+    return '<option value="' + a.toLowerCase() + '">' + a.toLowerCase() + '</option>';
   });
   $('.account').html(opts);
   $('.wallet_addresses').html(
@@ -455,13 +453,7 @@ $('#addiou').click(function () {
 // Pass in a discription of what you're printing, and then the object to print
 // Nếu muốn hiển thị log trên page thay vì console
 function log(description, obj) {
-  $('#log').html(
-    $('#log').html() +
-      description +
-      ': ' +
-      JSON.stringify(obj, null, 2) +
-      '\n\n'
-  );
+  $('#log').html($('#log').html() + description + ': ' + JSON.stringify(obj, null, 2) + '\n\n');
 }
 
 // =============================================================================
@@ -500,7 +492,7 @@ async function sanityCheck() {
   score += check('getUsers() initially empty', users.length === 0);
 
   var owed = await getTotalOwed(accounts[1]);
-  score += check('getTotalOwed(0) initially empty', owed === 0);
+  score += check('getTotalOwed(0) initially empty', owed.toNumber() === 0);
 
   var lookup_0_1 = await BlockchainSplitwise.lookup(accounts[0], accounts[1]);
   console.log('lookup(0, 1) current value' + lookup_0_1);
@@ -509,10 +501,11 @@ async function sanityCheck() {
   var response = await add_IOU(accounts[1], '10');
 
   users = await getUsers();
+  console.log({ 'User length: ': users.length });
   score += check('getUsers() now length 2', users.length === 2);
 
   owed = await getTotalOwed(accounts[0]);
-  score += check('getTotalOwed(0) now 10', owed === 10);
+  score += check('getTotalOwed(0) now 10', owed.toNumber() === 10);
 
   lookup_0_1 = await BlockchainSplitwise.lookup(accounts[0], accounts[1]);
   score += check('lookup(0,1) now 10', parseInt(lookup_0_1, 10) === 10);
@@ -520,12 +513,9 @@ async function sanityCheck() {
   var timeLastActive = await getLastActive(accounts[0]);
   var timeNow = Date.now() / 1000;
   var difference = timeNow - timeLastActive;
-  score += check(
-    'getLastActive(0) works',
-    difference <= 60 && difference >= -3
-  ); // -3 to 60 seconds
+  score += check('getLastActive(0) works', difference <= 60 && difference >= -3); // -3 to 60 seconds
 
   console.log('Final Score: ' + score + '/21');
 }
 
-// sanityCheck() //Uncomment this line to run the sanity check when you first open index.html
+// sanityCheck(); //Uncomment this line to run the sanity check when you first open index.html
