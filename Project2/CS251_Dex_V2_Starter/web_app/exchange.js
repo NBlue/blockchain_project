@@ -742,8 +742,7 @@ async function addLiquidity(amountEth, maxSlippagePct) {
     alert('Add liquidity successfully!');
   } catch (error) {
     console.log(error);
-    const errorMessage = error.error.message;
-    alert(errorMessage);
+    alert(error.error.message);
   }
 }
 
@@ -759,8 +758,7 @@ async function removeLiquidity(amountEth, maxSlippagePct) {
     alert('Remove liquidity successfully!');
   } catch (error) {
     console.log(error);
-    const errorMessage = error.error.message;
-    alert(errorMessage);
+    alert(error.error.message);
   }
 }
 
@@ -773,8 +771,7 @@ async function removeAllLiquidity(maxSlippagePct) {
     alert('Remove all liquidity successfully!');
   } catch (error) {
     console.log(error);
-    const errorMessage = error.error.message;
-    alert(errorMessage);
+    alert(error.error.message);
   }
 }
 
