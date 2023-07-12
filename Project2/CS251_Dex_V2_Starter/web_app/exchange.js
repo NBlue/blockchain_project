@@ -657,7 +657,6 @@ const exchange_contract = new ethers.Contract(exchange_address, exchange_abi, pr
 async function init() {
   var poolState = await getPoolState();
   console.log('starting init');
-  // console.log({ poolState });
   if (poolState['token_liquidity'] === 0 && poolState['eth_liquidity'] === 0) {
     // Call mint twice to make sure mint can be called mutliple times prior to disable_mint
     const total_supply = 100000;
@@ -668,7 +667,7 @@ async function init() {
     await token_contract
       .connect(provider.getSigner(defaultAccount))
       .approve(exchange_address, parseTokenAmountMul(total_supply));
-    // // initialize pool with equal amounts of ETH and tokens, so exchange rate begins as 1:1
+    // initialize pool with equal amounts of ETH and tokens, so exchange rate begins as 1:1
 
     await exchange_contract
       .connect(provider.getSigner(defaultAccount))
@@ -682,11 +681,7 @@ async function init() {
     .connect(provider.getSigner(defaultAccount))
     .getValueTest();
   console.log({ lp_provider: valueTest[0] });
-  // // console.log('total: ', valueTest[1].toString());
-  // // console.log('K: ', valueTest[2].toString());
   console.log({ lpValue: valueTest[3] });
-  // console.log('Token pool: ', valueTest[4].toString());
-  // console.log('ETH pool: ', valueTest[5].toString());
 }
 
 // Lấy trạng trái của 1 bể thanh khoản (số lượng vs tỉ giá)
@@ -868,8 +863,6 @@ async function getTokenBalance(walletAddress) {
 // Allows switching between accounts in 'My Account'
 provider.listAccounts().then((response) => {
   var opts = response.map(function (a) {
-    // getETHBalance(a);
-    // getTokenBalance(a);
     return '<option value="' + a.toLowerCase() + '">' + a.toLowerCase() + '</option>';
   });
   $('.account').html(opts);
